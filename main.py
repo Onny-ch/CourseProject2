@@ -1,4 +1,3 @@
-# main.py
 import os
 
 from src.fileworker import JSONFileWorker, CSVFileWorker
@@ -111,5 +110,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

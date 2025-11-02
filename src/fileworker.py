@@ -41,8 +41,7 @@ class JSONFileWorker(AbstractFileWorker):
     """
 
     def __init__(self, filename: str = "data/vacancies.json"):
-        self.__filename = filename  # приватный атрибут
-        # Создаем директорию, если её нет
+        self.__filename = filename
         dir_path = os.path.dirname(filename)
         if dir_path and not os.path.exists(dir_path):
             os.makedirs(dir_path, exist_ok=True)
@@ -67,7 +66,9 @@ class JSONFileWorker(AbstractFileWorker):
             print(f"[DEBUG] Загружено {len(data)} записей. Типы:")
             for i, item in enumerate(data):
                 if isinstance(item, dict):
-                    print(f"  [{i}] type={type(item).__name__}, id={item.get('id', 'нет')}")
+                    print(
+                        f"  [{i}] type={type(item).__name__}, id={item.get('id', 'нет')}"
+                    )
                 else:
                     print(f"  [{i}] type={type(item).__name__}")
 
@@ -77,15 +78,16 @@ class JSONFileWorker(AbstractFileWorker):
             return []
 
     def save_data(self, data: List[Dict[str, Any]]) -> None:
-        # Проверка: все элементы должны быть словарями
         for i, item in enumerate(data):
             if not isinstance(item, dict):
-                print(f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}")
+                print(
+                    f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}"
+                )
                 raise ValueError("Данные для сохранения должны быть словарями")
 
         try:
             if os.path.exists(self.__filename):
-                with open(self.__filename, 'r', encoding='utf-8') as f:
+                with open(self.__filename, "r", encoding="utf-8") as f:
                     try:
                         existing_data = json.load(f)
                     except json.JSONDecodeError:
@@ -93,12 +95,12 @@ class JSONFileWorker(AbstractFileWorker):
             else:
                 existing_data = []
 
-            existing_ids = {item.get('id') for item in existing_data if item.get('id')}
-            unique_new = [item for item in data if item.get('id') not in existing_ids]
+            existing_ids = {item.get("id") for item in existing_data if item.get("id")}
+            unique_new = [item for item in data if item.get("id") not in existing_ids]
 
             combined_data = existing_data + unique_new
 
-            with open(self.__filename, 'w', encoding='utf-8') as f:
+            with open(self.__filename, "w", encoding="utf-8") as f:
                 json.dump(combined_data, f, ensure_ascii=False, indent=4)
 
         except IOError as e:
@@ -126,10 +128,10 @@ class JSONFileWorker(AbstractFileWorker):
         except Exception as e:
             print(f"Неожиданная ошибка при очистке: {e}")
 
+
 class CSVFileWorker(AbstractFileWorker):
     def __init__(self, filename: str = "data/vacancies.csv"):
-        self.__filename = filename  # приватный атрибут
-        # Создаем директорию, если её нет
+        self.__filename = filename
         dir_path = os.path.dirname(filename)
         if dir_path and not os.path.exists(dir_path):
             os.makedirs(dir_path, exist_ok=True)
@@ -153,32 +155,35 @@ class CSVFileWorker(AbstractFileWorker):
         """Сохранить данные в CSV-файл (без дублирования по id)."""
         if not data:
             return
-        
-        # Проверка: все элементы должны быть словарями
+
         for i, item in enumerate(data):
             if not isinstance(item, dict):
-                print(f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}")
+                print(
+                    f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}"
+                )
                 raise ValueError("Данные для сохранения должны быть словарями")
-        
+
         try:
-            # Загружаем существующие данные
             if os.path.exists(self.__filename):
                 existing_data = self.load_data()
-                existing_ids = {item.get('id') for item in existing_data if item.get('id')}
-                unique_new = [item for item in data if item.get('id') not in existing_ids]
+                existing_ids = {
+                    item.get("id") for item in existing_data if item.get("id")
+                }
+                unique_new = [
+                    item for item in data if item.get("id") not in existing_ids
+                ]
                 combined_data = existing_data + unique_new
             else:
                 combined_data = data
-            
+
             if not combined_data:
                 return
-            
-            # Определяем все возможные поля из всех записей
+
             all_fieldnames = set()
             for item in combined_data:
                 all_fieldnames.update(item.keys())
             fieldnames = sorted(all_fieldnames)
-            
+
             with open(self.__filename, "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
@@ -190,19 +195,17 @@ class CSVFileWorker(AbstractFileWorker):
         """Удалить данные, удовлетворяющие условию."""
         data = self.load_data()
         filtered = [row for row in data if not condition(row)]
-        
+
         if not filtered:
-            # Если после фильтрации ничего не осталось, очищаем файл
             self.clear_file()
             return
-        
+
         try:
-            # Определяем все возможные поля из всех записей
             all_fieldnames = set()
             for item in filtered:
                 all_fieldnames.update(item.keys())
             fieldnames = sorted(all_fieldnames)
-            
+
             with open(self.__filename, "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
@@ -221,11 +224,9 @@ class CSVFileWorker(AbstractFileWorker):
                         writer = csv.DictWriter(f, fieldnames=fieldnames)
                         writer.writeheader()
                 else:
-                    # Если файл пустой или не существует, просто создаем пустой файл
                     with open(self.__filename, "w", newline="", encoding="utf-8") as f:
                         pass
             else:
-                # Файл не существует, создаем пустой
                 with open(self.__filename, "w", newline="", encoding="utf-8") as f:
                     pass
             print(f"Файл {self.__filename} успешно очищен!")

@@ -32,23 +32,26 @@ class HeadHunterAPI(Parser):
         self.__file_worker = file_worker
         self.__url = "https://api.hh.ru/vacancies"
         self.__headers = {"User-Agent": "HH-User-Agent"}
-        self.__params = {"text": "", "page": 0, "per_page": 100}  # Оптимизировано: больше вакансий за запрос
+        self.__params = {
+            "text": "",
+            "page": 0,
+            "per_page": 100,
+        }
         self.__vacancies = []
 
     def __connect_to_api(self) -> requests.Response:
         """Приватный метод подключения к API. Проверяет статус-код ответа."""
         response = requests.get(
-            self.__url,
-            headers=self.__headers,
-            params=self.__params,
-            timeout=10
+            self.__url, headers=self.__headers, params=self.__params, timeout=10
         )
-        
-        if response.status_code == 429:  # Too Many Requests
+
+        if response.status_code == 429:
             raise requests.HTTPError("Превышен лимит запросов")
         elif response.status_code != 200:
-            raise requests.HTTPError(f"Не удалось подключиться к API (код: {response.status_code})")
-        
+            raise requests.HTTPError(
+                f"Не удалось подключиться к API (код: {response.status_code})"
+            )
+
         return response
 
     def connect_to_api(self) -> requests.Response:
@@ -58,25 +61,25 @@ class HeadHunterAPI(Parser):
     def load_vacancies(self, keyword: str):
         """Загрузить вакансии по ключевому слову."""
         self.__params["text"] = keyword
-        self.__vacancies = []  # Очищаем предыдущие результаты
+        self.__vacancies = []
         page = 0
-        max_pages = 20  # Ограничение для предотвращения чрезмерных запросов
-        
+        max_pages = 20
+
         while page < max_pages:
             self.__params["page"] = page
             try:
-                # Используем приватный метод подключения к API
                 response = self.__connect_to_api()
-                
+
                 data = response.json()
                 items = data.get("items", [])
                 if not items:
                     break
 
                 for item in items:
-                    # Проверка: item должен быть словарем
                     if not isinstance(item, dict):
-                        print(f"Пропущена некорректная запись (не словарь): {repr(item)}")
+                        print(
+                            f"Пропущена некорректная запись (не словарь): {repr(item)}"
+                        )
                         continue
 
                     try:
@@ -86,13 +89,12 @@ class HeadHunterAPI(Parser):
                         print(f"Пропущена некорректная вакансия: {e}")
                         continue
 
-                # Проверяем, есть ли еще страницы
                 pages = data.get("pages", 0)
                 if page >= pages - 1:
                     break
-                    
+
                 page += 1
-                
+
             except requests.HTTPError as e:
                 print(f"{e}")
                 break
@@ -118,4 +120,3 @@ class HeadHunterAPI(Parser):
     def clear_vacancies(self) -> None:
         """Очистить список вакансий."""
         self.__vacancies = []
-

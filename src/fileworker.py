@@ -42,6 +42,10 @@ class JSONFileWorker(AbstractFileWorker):
 
     def __init__(self, filename: str = "data/vacancies.json"):
         self.__filename = filename  # приватный атрибут
+        # Создаем директорию, если её нет
+        dir_path = os.path.dirname(filename)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
 
     @property
     def filename(self) -> str:
@@ -56,13 +60,17 @@ class JSONFileWorker(AbstractFileWorker):
             with open(self.__filename, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            print(f"[DEBUG] Загружено {len(data)} записей. Типы:")
-            for i, item in enumerate(data):
-                print(f"  [{i}] type={type(item).__name__}, id={item.get('id', 'нет')}")
-
             if not isinstance(data, list):
                 print(f"[ERROR] Корневой элемент не список: {type(data)}")
                 return []
+
+            print(f"[DEBUG] Загружено {len(data)} записей. Типы:")
+            for i, item in enumerate(data):
+                if isinstance(item, dict):
+                    print(f"  [{i}] type={type(item).__name__}, id={item.get('id', 'нет')}")
+                else:
+                    print(f"  [{i}] type={type(item).__name__}")
+
             return data
         except (json.JSONDecodeError, IOError) as e:
             print(f"[ERROR] Чтение файла {self.__filename}: {e}")
@@ -103,7 +111,7 @@ class JSONFileWorker(AbstractFileWorker):
         filtered_data = [item for item in data if not condition(item)]
         try:
             with open(self.__filename, "w", encoding="utf-8") as f:
-                json.dump(filtered_data, f, ensure_ascii=False)
+                json.dump(filtered_data, f, ensure_ascii=False, indent=4)
         except IOError as e:
             print(f"Ошибка удаления данных из {self.__filename}: {e}")
 
@@ -118,55 +126,108 @@ class JSONFileWorker(AbstractFileWorker):
         except Exception as e:
             print(f"Неожиданная ошибка при очистке: {e}")
 
-    def __remove_duplicates(
-        self, existing: List[Dict[str, Any]], new: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        Удалить дубликаты между существующими и новыми данными.
-        Дубликаты определяются по полю 'id' вакансии.
-        """
-
-        existing_ids = {item.get("id") for item in existing if item.get("id")}
-        unique_new = [item for item in new if item.get("id") not in existing_ids]
-        return existing + unique_new
-
-
 class CSVFileWorker(AbstractFileWorker):
     def __init__(self, filename: str = "data/vacancies.csv"):
-        self.__filename = filename
+        self.__filename = filename  # приватный атрибут
+        # Создаем директорию, если её нет
+        dir_path = os.path.dirname(filename)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+
+    @property
+    def filename(self) -> str:
+        """Геттер для приватного атрибута filename."""
+        return self.__filename
 
     def load_data(self) -> List[Dict[str, Any]]:
         if not os.path.exists(self.__filename):
             return []
-        with open(self.__filename, "r", newline="", encoding="utf-8") as f:
-            return list(csv.DictReader(f))
+        try:
+            with open(self.__filename, "r", newline="", encoding="utf-8") as f:
+                return list(csv.DictReader(f))
+        except (IOError, csv.Error) as e:
+            print(f"[ERROR] Чтение CSV файла {self.__filename}: {e}")
+            return []
 
     def save_data(self, data: List[Dict[str, Any]]) -> None:
+        """Сохранить данные в CSV-файл (без дублирования по id)."""
+        if not data:
+            return
+        
+        # Проверка: все элементы должны быть словарями
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                print(f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}")
+                raise ValueError("Данные для сохранения должны быть словарями")
+        
         try:
+            # Загружаем существующие данные
+            if os.path.exists(self.__filename):
+                existing_data = self.load_data()
+                existing_ids = {item.get('id') for item in existing_data if item.get('id')}
+                unique_new = [item for item in data if item.get('id') not in existing_ids]
+                combined_data = existing_data + unique_new
+            else:
+                combined_data = data
+            
+            if not combined_data:
+                return
+            
+            # Определяем все возможные поля из всех записей
+            all_fieldnames = set()
+            for item in combined_data:
+                all_fieldnames.update(item.keys())
+            fieldnames = sorted(all_fieldnames)
+            
             with open(self.__filename, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(data)
-        except IOError as e:
+                writer.writerows(combined_data)
+        except (IOError, csv.Error) as e:
             print(f"Ошибка записи в файл {self.__filename}: {e}")
 
     def remove_data(self, condition: Callable[[Dict[str, Any]], bool]) -> None:
+        """Удалить данные, удовлетворяющие условию."""
         data = self.load_data()
         filtered = [row for row in data if not condition(row)]
-        self.save_data(filtered)
+        
+        if not filtered:
+            # Если после фильтрации ничего не осталось, очищаем файл
+            self.clear_file()
+            return
+        
+        try:
+            # Определяем все возможные поля из всех записей
+            all_fieldnames = set()
+            for item in filtered:
+                all_fieldnames.update(item.keys())
+            fieldnames = sorted(all_fieldnames)
+            
+            with open(self.__filename, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(filtered)
+        except (IOError, csv.Error) as e:
+            print(f"Ошибка удаления данных из {self.__filename}: {e}")
 
     def clear_file(self) -> None:
         """Полностью очищает CSV-файл, удаляя все строки (кроме заголовка, если есть)."""
-
         try:
-            sample_data = self.load_data()
-            if sample_data:
-                fieldnames = sample_data[0].keys()
-                with open(self.__filename, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                    writer.writeheader()
+            if os.path.exists(self.__filename):
+                sample_data = self.load_data()
+                if sample_data and len(sample_data) > 0:
+                    fieldnames = list(sample_data[0].keys())
+                    with open(self.__filename, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                        writer.writeheader()
+                else:
+                    # Если файл пустой или не существует, просто создаем пустой файл
+                    with open(self.__filename, "w", newline="", encoding="utf-8") as f:
+                        pass
             else:
-                open(self.__filename, "w").close()
+                # Файл не существует, создаем пустой
+                with open(self.__filename, "w", newline="", encoding="utf-8") as f:
+                    pass
             print(f"Файл {self.__filename} успешно очищен!")
         except IOError as e:
             print(f"Ошибка при очистке файла {self.__filename}: {e}")

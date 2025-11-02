@@ -1,6 +1,13 @@
-import re
+import ast
 from decimal import Decimal
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
+
+from src.services import (
+    clean_html,
+    extract_probation_period,
+    validate_title,
+    validate_url,
+)
 
 
 class Vacancy:
@@ -25,117 +32,180 @@ class Vacancy:
     )
 
     def __init__(self, data: Dict[str, Any]):
-        """Инициализация из JSON-объекта вакансий с HH.ru."""
+        """Инициализация из JSON-объекта вакансий с HH.ru или из сохраненных данных."""
 
         if not isinstance(data, dict):
             raise TypeError(f"Ожидался словарь, получено: {type(data)} (значение: {repr(data)})")
 
-        self.id = data.get("id", "")
-        self.title = self.__validate_title(data.get("title", ""))
-        self.url = self.__validate_url(data.get("alternate_url", ""))
+        # Определяем формат данных: сохраненные данные имеют поле 'url', сырые API данные - 'alternate_url'
+        is_saved_format = "url" in data or "employer_name" in data
 
-        # Работодатель
-        employer = data.get("employer", {})
-        self.employer_name = employer.get("name", "Не указано")
-        self.employer_url = employer.get("alternate_url", None)
+        self.id = str(data.get("id", "")) if data.get("id") else ""
+        # HH API использует "name", сохраненные данные - "title"
+        title_value = data.get("title") if is_saved_format else data.get("name", data.get("title", ""))
+        self.title = validate_title(title_value)
 
-        # Зарплата
-        salary = data.get("salary")
-        if salary is None:
-            salary = {}
-        elif not isinstance(salary, dict):
-            salary = {}
+        if is_saved_format:
+            # Загружаем из сохраненных данных (плоский формат)
+            self.url = validate_url(data.get("url", ""))
+            self.employer_name = data.get("employer_name", "Не указано")
+            self.employer_url = data.get("employer_url")
+            
+            # Зарплата из плоского формата
+            value_from = data.get("salary_from")
+            if value_from is None or value_from == "":
+                value_from = 0
+            else:
+                try:
+                    value_from = int(float(str(value_from)))
+                except (ValueError, TypeError):
+                    value_from = 0
+            self.salary_from = Decimal(str(value_from))
 
-        # Обработка salary_from
-        value_from = salary.get("from")
-        if value_from is None:
-            value_from = 0
-        elif isinstance(value_from, float):
-            value_from = int(value_from)
-        self.salary_from = Decimal(str(value_from))
+            value_to = data.get("salary_to")
+            if value_to is None or value_to == "":
+                value_to = 0
+            else:
+                try:
+                    value_to = int(float(str(value_to)))
+                except (ValueError, TypeError):
+                    value_to = 0
+            self.salary_to = Decimal(str(value_to))
 
-        # Аналогично для salary_to
-        value_to = salary.get("to")
-        if value_to is None:
-            value_to = 0
-        elif isinstance(value_to, float):
-            value_to = int(value_to)
-        self.salary_to = Decimal(str(value_to))
+            self.currency = data.get("currency", "RUB")
+            gross_val = data.get("gross")
+            if isinstance(gross_val, str):
+                self.gross = gross_val.lower() in ("true", "1", "yes", "да")
+            else:
+                self.gross = bool(gross_val) if gross_val is not None else True
 
-        self.currency = salary.get("currency", "RUB")
-        self.gross = salary.get("gross", True)
+            # Адрес из плоского формата
+            self.city = data.get("city", "Не указан")
+            self.street = data.get("street", "")
+            self.building = data.get("building", "")
 
-        # Адрес
-        address = data.get("address")
-        if address is None:
-            address = {}
-        elif not isinstance(address, dict):
-            address = {}
+            # Обязанности и требования из плоского формата
+            self.responsibilities = clean_html(data.get("responsibilities", ""))
+            self.requirements = clean_html(data.get("requirements", ""))
 
-        self.city = address.get("city", "Не указан")
-        self.street = address.get("street", "")
-        self.building = address.get("building", "")
+            # Профессиональные роли из плоского формата
+            roles = data.get("professional_roles", [])
+            if isinstance(roles, str):
+                # Если это строка (из CSV), пытаемся распарсить
+                try:
+                    roles = ast.literal_eval(roles)
+                except (ValueError, SyntaxError):
+                    roles = []
+            if roles and isinstance(roles, list):
+                self.professional_roles = [
+                    role if isinstance(role, str) else str(role)
+                    for role in roles
+                ]
+            else:
+                self.professional_roles = []
 
-        # Обязанности и требования
-        snippet = data.get("snippet", {})
-        self.responsibilities = self.__clean_html(snippet.get("responsibility", ""))
-        self.requirements = self.__clean_html(snippet.get("requirement", ""))
+            # Опыт работы из плоского формата
+            self.experience = data.get("experience", "Не указан")
 
-        # Профессиональные роли
-        roles = data.get("professional_roles", [])
-        self.professional_roles = [role["name"] for role in roles] if roles else []
+            # Испытательный срок
+            probation = data.get("probation_period")
+            if probation:
+                self.probation_period = str(probation)
+            else:
+                self.probation_period = extract_probation_period(
+                    self.responsibilities + " " + self.requirements
+                )
+        else:
+            # Загружаем из сырых данных API (вложенный формат)
+            self.url = validate_url(data.get("alternate_url", ""))
 
-        # Опыт работы
-        experience = data.get("experience", {})
-        self.experience = experience.get("name", "Не указан")
+            # Работодатель
+            employer = data.get("employer")
+            if employer and isinstance(employer, dict):
+                self.employer_name = employer.get("name", "Не указано")
+                self.employer_url = employer.get("alternate_url", None)
+            else:
+                self.employer_name = "Не указано"
+                self.employer_url = None
 
-        # Испытательный срок
-        self.probation_period = self.__extract_probation(
-            self.responsibilities + " " + self.requirements
-        )
+            # Зарплата
+            salary = data.get("salary")
+            if salary and isinstance(salary, dict):
+                # Обработка salary_from
+                value_from = salary.get("from")
+                if value_from is None:
+                    value_from = 0
+                elif isinstance(value_from, float):
+                    value_from = int(value_from)
+                else:
+                    try:
+                        value_from = int(float(str(value_from)))
+                    except (ValueError, TypeError):
+                        value_from = 0
+                self.salary_from = Decimal(str(value_from))
 
-    def __validate_title(self, title: str) -> str:
-        if not title or not title.strip():
-            return "Вакансия без названия"
-        return title.strip()
+                # Аналогично для salary_to
+                value_to = salary.get("to")
+                if value_to is None:
+                    value_to = 0
+                elif isinstance(value_to, float):
+                    value_to = int(value_to)
+                else:
+                    try:
+                        value_to = int(float(str(value_to)))
+                    except (ValueError, TypeError):
+                        value_to = 0
+                self.salary_to = Decimal(str(value_to))
 
-    def __validate_url(self, url: str) -> str:
-        if url and not re.match(r"^https?://", url):
-            raise ValueError(f"Некорректный URL: {url}")
-        return url or ""
+                self.currency = salary.get("currency", "RUB")
+                self.gross = salary.get("gross", True)
+            else:
+                self.salary_from = Decimal("0")
+                self.salary_to = Decimal("0")
+                self.currency = "RUB"
+                self.gross = True
 
-    def __validate_salary(self, value: Optional[Union[int, float]]) -> Decimal:
-        if value is None:
-            return Decimal("0")
-        try:
-            return Decimal(str(value))
-        except:
-            return Decimal("0")
+            # Адрес
+            address = data.get("address")
+            if address and isinstance(address, dict):
+                self.city = address.get("city", "Не указан")
+                self.street = address.get("street", "")
+                self.building = address.get("building", "")
+            else:
+                self.city = "Не указан"
+                self.street = ""
+                self.building = ""
 
-    def __clean_html(self, text: str) -> str:
-        """Удаляет HTML-теги из текста"""
-        if not text:
-            return ""
-        return re.sub(r"<[^>]+>", "", text).strip()
+            # Обязанности и требования
+            snippet = data.get("snippet", {})
+            if snippet and isinstance(snippet, dict):
+                self.responsibilities = clean_html(snippet.get("responsibility", ""))
+                self.requirements = clean_html(snippet.get("requirement", ""))
+            else:
+                self.responsibilities = ""
+                self.requirements = ""
 
-    def _Vacancy__extract_probation(self, text: str) -> Optional[str]:
-        import re
-        # Ищем шаблоны: "3 месяца", "2 недели", "1 день" и т.п.
-        pattern = r'(\d+)\s*(месяц|недел|день|год)а?'
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            count = match.group(1)
-            unit = match.group(2)
-            # Корректируем окончание
-            if unit == "месяц":
-                return f"{count} месяца"
-            elif unit == "недел":
-                return f"{count} недели"
-            elif unit == "день":
-                return f"{count} дня"
-            elif unit == "год":
-                return f"{count} года"
-        return None
+            # Профессиональные роли
+            roles = data.get("professional_roles", [])
+            if roles and isinstance(roles, list):
+                self.professional_roles = [
+                    role.get("name", "") if isinstance(role, dict) else str(role)
+                    for role in roles
+                ]
+            else:
+                self.professional_roles = []
+
+            # Опыт работы
+            experience = data.get("experience", {})
+            if experience and isinstance(experience, dict):
+                self.experience = experience.get("name", "Не указан")
+            else:
+                self.experience = "Не указан"
+
+            # Испытательный срок
+            self.probation_period = extract_probation_period(
+                self.responsibilities + " " + self.requirements
+            )
 
     @property
     def salary_info(self) -> str:

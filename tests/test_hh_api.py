@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +13,10 @@ from src.vacancy import Vacancy
 @pytest.fixture(autouse=True)
 def cleanup_test_files():
     """Удаляет тестовые файлы после выполнения тестов."""
-    test_files = ["data/hh_test.json"]
+    test_files = [
+        "data/hh_test.json",
+        "dummy.json",  # Тестовый файл из test_connect_to_api_* методов
+    ]
     for f in test_files:
         if os.path.exists(f):
             os.remove(f)
@@ -33,12 +37,13 @@ def test_load_vacancies_success(mock_get, hh_parser):
             status_code=200,
             json=lambda: {
                 "items": [
-                    {"id": "1", "name": "Dev", "salary": {"from": 100000}},
-                    {"id": "2", "name": "QA", "salary": {"from": 80000}},
-                ]
+                    {"id": "1", "name": "Dev", "alternate_url": "https://hh.ru/vacancy/1", "salary": {"from": 100000}},
+                    {"id": "2", "name": "QA", "alternate_url": "https://hh.ru/vacancy/2", "salary": {"from": 80000}},
+                ],
+                "pages": 1
             },
         ),
-        MagicMock(status_code=200, json=lambda: {"items": []}),
+        MagicMock(status_code=200, json=lambda: {"items": [], "pages": 0}),
     ]
     mock_get.side_effect = mock_responses
 
@@ -47,7 +52,7 @@ def test_load_vacancies_success(mock_get, hh_parser):
     vacancies = hh_parser.get_vacancies()
     assert len(vacancies) == 2
     assert vacancies[0].title == "Dev"
-    assert vacancies[1].salary_from == 80000
+    assert vacancies[1].salary_from == Decimal("80000")
 
 
 @patch("requests.get")
@@ -55,7 +60,7 @@ def test_load_vacancies_empty(mock_get, hh_parser):
     """Проверяет обработку пустого ответа API (нет вакансий)."""
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"items": []}
+    mock_response.json.return_value = {"items": [], "pages": 0}
     mock_get.return_value = mock_response
 
     hh_parser.load_vacancies("python")
@@ -87,7 +92,7 @@ def test_load_vacancies_http_error(mock_get, hh_parser, capsys):
 def test_get_vacancies(hh_parser):
     """Проверяет получение списка загруженных вакансий."""
     hh_parser._HeadHunterAPI__vacancies = [
-        Vacancy({"id": "1", "name": "Test", "salary": {"from": 50000}})
+        Vacancy({"id": "1", "name": "Test", "alternate_url": "https://hh.ru/vacancy/1", "salary": {"from": 50000}})
     ]
     vacancies = hh_parser.get_vacancies()
     assert len(vacancies) == 1
@@ -104,29 +109,35 @@ def test_save_vacancies_empty(hh_parser, capsys):
 
 def test_clear_vacancies(hh_parser):
     """Проверяет очистку списка загруженных вакансий."""
-    hh_parser._HeadHunterAPI__vacancies = [Vacancy({"id": "1", "name": "Test"})]
+    hh_parser._HeadHunterAPI__vacancies = [Vacancy({"id": "1", "name": "Test", "alternate_url": ""})]
     hh_parser.clear_vacancies()
     assert len(hh_parser.get_vacancies()) == 0
 
 
 @patch("requests.get")
 def test_connect_to_api_success(mock_get):
-    """Проверяет успешное подключение к API."""
+    """Проверяет успешное подключение к API (метод удален, тестируем через load_vacancies)."""
     mock_response = MagicMock()
     mock_response.status_code = 200
+    mock_response.json.return_value = {"items": [], "pages": 0}
     mock_get.return_value = mock_response
 
     parser = HeadHunterAPI(JSONFileWorker("dummy.json"))
-    response = parser._HeadHunterAPI__connect_to_api()
-    assert response.status_code == 200
+    parser.load_vacancies("test")
+    assert len(parser.get_vacancies()) == 0
 
 
-@patch("requests.get", side_effect=[MagicMock(status_code=500)] * 3)
+@patch("requests.get")
 def test_connect_to_api_retries_fail(mock_get):
-    """Проверяет отказ после трёх попыток подключения к API."""
+    """Проверяет обработку ошибок API (метод удален, тестируем через load_vacancies)."""
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_get.return_value = mock_response
+
     parser = HeadHunterAPI(JSONFileWorker("dummy.json"))
-    with pytest.raises(requests.HTTPError):
-        parser._HeadHunterAPI__connect_to_api()
+    parser.load_vacancies("test")
+    # При ошибке вакансии не загружаются
+    assert len(parser.get_vacancies()) == 0
 
 
 def test_save_vacancies_file_content(hh_parser):
@@ -136,6 +147,7 @@ def test_save_vacancies_file_content(hh_parser):
             {
                 "id": "1",
                 "name": "Python Dev",
+                "alternate_url": "https://hh.ru/vacancy/1",
                 "salary": {"from": 150000, "to": 200000, "currency": "RUB"},
                 "address": {"city": "Москва"},
             }
@@ -147,5 +159,97 @@ def test_save_vacancies_file_content(hh_parser):
 
     assert len(loaded) == 1
     assert loaded[0]["title"] == "Python Dev"
-    assert loaded[0]["salary_from"] == 150000.0
+    assert loaded[0]["salary_from"] == 150000
     assert loaded[0]["city"] == "Москва"
+
+
+@patch("requests.get")
+def test_load_vacancies_non_dict_item(mock_get, hh_parser, capsys):
+    """Проверяет обработку некорректных записей (не словарей)."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "items": [
+            {"id": "1", "name": "Valid", "alternate_url": "https://hh.ru/vacancy/1"},
+            "invalid string",  # Некорректная запись
+            {"id": "2", "name": "Valid2", "alternate_url": "https://hh.ru/vacancy/2"},
+        ],
+        "pages": 1,
+    }
+    mock_get.return_value = mock_response
+
+    hh_parser.load_vacancies("python")
+    captured = capsys.readouterr()
+    assert "Пропущена некорректная запись" in captured.out
+    vacancies = hh_parser.get_vacancies()
+    assert len(vacancies) == 2
+
+
+@patch("requests.get")
+def test_load_vacancies_invalid_vacancy(mock_get, hh_parser, capsys):
+    """Проверяет обработку невалидных вакансий."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "items": [
+            {"id": "1", "name": "Valid", "alternate_url": "https://hh.ru/vacancy/1"},
+            {"id": "2", "name": "", "alternate_url": "invalid-url"},  # Невалидный URL
+        ],
+        "pages": 1,
+    }
+    mock_get.return_value = mock_response
+
+    hh_parser.load_vacancies("python")
+    captured = capsys.readouterr()
+    assert "Пропущена некорректная вакансия" in captured.out
+    vacancies = hh_parser.get_vacancies()
+    assert len(vacancies) == 1
+
+
+@patch("requests.get")
+def test_load_vacancies_pagination(mock_get, hh_parser):
+    """Проверяет пагинацию при загрузке вакансий."""
+    mock_responses = [
+        MagicMock(
+            status_code=200,
+            json=lambda: {
+                "items": [{"id": str(i), "name": f"Job{i}", "alternate_url": f"https://hh.ru/vacancy/{i}"} for i in range(5)],
+                "pages": 3,
+            },
+        ),
+        MagicMock(
+            status_code=200,
+            json=lambda: {
+                "items": [{"id": str(i), "name": f"Job{i}", "alternate_url": f"https://hh.ru/vacancy/{i}"} for i in range(5, 10)],
+                "pages": 3,
+            },
+        ),
+        MagicMock(status_code=200, json=lambda: {"items": [], "pages": 3}),
+    ]
+    mock_get.side_effect = mock_responses
+
+    hh_parser.load_vacancies("python")
+    vacancies = hh_parser.get_vacancies()
+    assert len(vacancies) == 10
+
+
+@patch("requests.get")
+def test_connect_to_api_rate_limit(mock_get, hh_parser, capsys):
+    """Проверяет обработку ошибки rate limit (429)."""
+    mock_response = MagicMock()
+    mock_response.status_code = 429
+    mock_get.return_value = mock_response
+
+    with pytest.raises(requests.HTTPError, match="Превышен лимит запросов"):
+        hh_parser.connect_to_api()
+
+
+@patch("requests.get")
+def test_connect_to_api_non_200(mock_get, hh_parser):
+    """Проверяет обработку не-200 статус кода."""
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    mock_get.return_value = mock_response
+
+    with pytest.raises(requests.HTTPError, match="Не удалось подключиться к API"):
+        hh_parser.connect_to_api()

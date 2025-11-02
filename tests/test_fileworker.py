@@ -16,6 +16,7 @@ def cleanup_test_files():
         "data/test_vacancies.csv",
         "data/test_vacancies_empty.json",
         "data/test_vacancies_corrupted.json",
+        "dummy.json",  # Тестовый файл из test_json_remove_duplicates_private_method
     ]
     for f in test_files:
         if os.path.exists(f):
@@ -94,11 +95,14 @@ def test_json_clear_file():
 
 
 def test_json_remove_duplicates_private_method():
-    """Проверка метода удаления дубликатов в JSON."""
+    """Проверка отсутствия дубликатов при сохранении (метод удален, но функциональность работает через save_data)."""
     worker = JSONFileWorker("dummy.json")
     existing = [{"id": "1", "title": "Existing"}]
     new = [{"id": "1", "title": "New"}, {"id": "2", "title": "Unique"}]
-    result = worker._JSONFileWorker__remove_duplicates(existing, new)
+    # Тестируем функциональность через save_data
+    worker.save_data(existing)
+    worker.save_data(new)
+    result = worker.load_data()
     assert len(result) == 2
     assert result[0]["id"] == "1"
     assert result[1]["id"] == "2"
@@ -133,7 +137,8 @@ def test_csv_remove_data():
             {"id": "2", "title": "Remove"},
         ]
     )
-    worker.remove_data(lambda x: x["id"] == "2")
+    # CSV load_data возвращает OrderedDict, нужно сравнить строки значений
+    worker.remove_data(lambda x: str(x.get("id")) == "2")
     data = worker.load_data()
     assert len(data) == 1
     assert data[0]["title"] == "Keep"
@@ -161,7 +166,7 @@ def test_json_save_data_io_error(mock_open, capsys):
     worker = JSONFileWorker("data/test.json")
     worker.save_data([{"id": "1"}])
     captured = capsys.readouterr()
-    assert "Ошибка записи в файл data/test.json: Disk error" in captured.out
+    assert "[ERROR] Запись в файл data/test.json: Disk error" in captured.out
 
 
 @patch("builtins.open", side_effect=IOError("Disk error"))
@@ -189,3 +194,72 @@ def test_csv_clear_file_io_error(mock_open, capsys):
     worker.clear_file()
     captured = capsys.readouterr()
     assert "Ошибка при очистке файла data/test.csv: Disk error" in captured.out
+
+
+def test_json_save_data_with_non_dict():
+    """Проверка ошибки при сохранении не-словаря."""
+    worker = JSONFileWorker("data/test.json")
+    with pytest.raises(ValueError, match="Данные для сохранения должны быть словарями"):
+        worker.save_data([{"id": "1"}, "not a dict", {"id": "2"}])
+
+
+def test_csv_save_data_with_non_dict():
+    """Проверка ошибки при сохранении не-словаря в CSV."""
+    worker = CSVFileWorker("data/test.csv")
+    with pytest.raises(ValueError, match="Данные для сохранения должны быть словарями"):
+        worker.save_data([{"id": "1"}, "not a dict", {"id": "2"}])
+
+
+def test_json_save_data_empty_list():
+    """Проверка сохранения пустого списка в JSON."""
+    worker = JSONFileWorker("data/test_empty.json")
+    # Если файл существует, очищаем его
+    if os.path.exists(worker.filename):
+        worker.clear_file()
+    worker.save_data([])
+    data = worker.load_data()
+    # Пустой список не сохраняется (функция возвращается раньше)
+    # Проверяем что вызов не вызывает ошибку
+    assert isinstance(data, list)
+
+
+def test_csv_remove_data_empty_result():
+    """Проверка удаления всех данных из CSV."""
+    worker = CSVFileWorker("data/test.csv")
+    worker.save_data([{"id": "1", "title": "Test"}])
+    worker.remove_data(lambda x: True)  # Удалить все
+    data = worker.load_data()
+    assert data == []
+
+
+def test_json_clear_file_exception():
+    """Проверка обработки исключения при очистке JSON файла."""
+    worker = JSONFileWorker("data/test.json")
+    worker.save_data([{"id": "1"}])
+    
+    with patch("builtins.open", side_effect=Exception("Unexpected error")):
+        worker.clear_file()
+    # Файл должен остаться
+    assert os.path.exists("data/test.json")
+
+
+def test_json_load_data_not_list():
+    """Проверка загрузки JSON файла, где корневой элемент не список."""
+    worker = JSONFileWorker("data/test_not_list.json")
+    with open(worker.filename, "w", encoding="utf-8") as f:
+        json.dump({"not": "a list"}, f, ensure_ascii=False)
+    
+    data = worker.load_data()
+    assert data == []
+
+
+def test_json_save_data_corrupted_existing():
+    """Проверка сохранения когда существующий файл поврежден."""
+    worker = JSONFileWorker("data/test_corrupted.json")
+    with open(worker.filename, "w", encoding="utf-8") as f:
+        f.write("{invalid json}")
+    
+    worker.save_data([{"id": "1", "title": "New"}])
+    data = worker.load_data()
+    assert len(data) == 1
+    assert data[0]["title"] == "New"

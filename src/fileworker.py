@@ -63,15 +63,6 @@ class JSONFileWorker(AbstractFileWorker):
                 print(f"[ERROR] Корневой элемент не список: {type(data)}")
                 return []
 
-            print(f"[DEBUG] Загружено {len(data)} записей. Типы:")
-            for i, item in enumerate(data):
-                if isinstance(item, dict):
-                    print(
-                        f"  [{i}] type={type(item).__name__}, id={item.get('id', 'нет')}"
-                    )
-                else:
-                    print(f"  [{i}] type={type(item).__name__}")
-
             return data
         except (json.JSONDecodeError, IOError) as e:
             print(f"[ERROR] Чтение файла {self.__filename}: {e}")

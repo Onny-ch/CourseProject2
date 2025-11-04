@@ -1,9 +1,9 @@
+# main.py
 import os
 
 from src.fileworker import JSONFileWorker, CSVFileWorker
 from src.hh_api import HeadHunterAPI
 from src.vacancy import Vacancy
-
 
 
 def main():
@@ -61,29 +61,102 @@ def main():
             if not data:
                 print("В файле нет сохранённых вакансий.\n")
             else:
-                print(f"\nСохранённые вакансии ({len(data)} шт.):")
-                valid_count = 0
-                for i, item in enumerate(data, 1):
+                # Преобразуем данные в список Vacancy объектов
+                vacancies = []
+                for item in data:
                     try:
                         if not isinstance(item, dict):
-                            print(f"{i}. ОШИБКА: НЕ словарь (тип: {type(item).__name__})")
-                            print(f"   Значение: {repr(item)}")
                             continue
-
-                        if 'id' not in item:
-                            print(f"{i}. ОШИБКА: нет поля 'id'")
+                        # Проверяем наличие id и хотя бы одного из полей title или name
+                        if 'id' not in item or (not item.get('title') and not item.get('name')):
                             continue
-                        if 'title' not in item:
-                            print(f"{i}. ОШИБКА: нет поля 'title'")
-                            continue
-
                         vacancy = Vacancy(item)
-                        print(f"{i}. {vacancy}")
-                        valid_count += 1
+                        vacancies.append(vacancy)
+                    except (ValueError, KeyError, TypeError, AttributeError):
+                        continue
 
-                    except (ValueError, KeyError, TypeError, AttributeError) as e:
-                        print(f"{i}. ОШИБКА при обработке: {type(e).__name__}: {e}")
-                print(f"\nУспешно отображено: {valid_count} из {len(data)} записей\n")
+                if not vacancies:
+                    print("Не удалось загрузить вакансии из файла.\n")
+                    continue
+
+                # Подменю для просмотра вакансий
+                print("\nВыберите способ просмотра вакансий:")
+                print("1 — Показать все вакансии")
+                print("2 — Показать топ N вакансий по зарплате")
+                print("3 — Поиск по ключевому слову в описании")
+                view_choice = input("Введите номер (1–3): ").strip()
+
+                if view_choice == "1":
+                    # Показать все вакансии
+                    print(f"\nСохранённые вакансии ({len(vacancies)} шт.):")
+                    for i, vacancy in enumerate(vacancies, 1):
+                        # Отображаем профессиональную роль вместо названия
+                        professional_role = ", ".join(
+                            vacancy.professional_roles) if vacancy.professional_roles else "Не указано"
+                        salary_part = vacancy.salary_info
+                        city_part = vacancy.city if vacancy.city != "Не указан" else ""
+                        parts = [professional_role, salary_part, city_part]
+                        print(f"{i}. {' | '.join(filter(None, parts))}")
+                    print()
+
+                elif view_choice == "2":
+                    # Показать топ N вакансий по зарплате
+                    while True:
+                        try:
+                            n_input = input("Введите количество вакансий для отображения (N): ").strip()
+                            n = int(n_input)
+                            if n <= 0:
+                                print("Количество должно быть положительным числом.\n")
+                                continue
+                            break
+                        except ValueError:
+                            print("Некорректный ввод. Пожалуйста, введите целое число.\n")
+
+                    # Сортируем по средней зарплате (по убыванию)
+                    sorted_vacancies = sorted(vacancies, key=lambda v: v.average_salary(), reverse=True)
+                    top_n = sorted_vacancies[:n]
+
+                    print(f"\nТоп {len(top_n)} вакансий по зарплате:")
+                    for i, vacancy in enumerate(top_n, 1):
+                        avg_salary = int(vacancy.average_salary())
+                        salary_str = f"{avg_salary:,} {vacancy.currency}" if avg_salary > 0 else "Зарплата не указана"
+                        # Отображаем профессиональную роль вместо названия
+                        professional_role = ", ".join(
+                            vacancy.professional_roles) if vacancy.professional_roles else "Не указано"
+                        print(
+                            f"{i}. {professional_role} | {salary_str} | {vacancy.city if vacancy.city != 'Не указан' else ''}")
+                    print()
+
+                elif view_choice == "3":
+                    # Поиск по ключевому слову в описании
+                    keyword = input("Введите ключевое слово для поиска в описании: ").strip().lower()
+                    if not keyword:
+                        print("Ключевое слово не может быть пустым.\n")
+                        continue
+
+                    # Ищем вакансии, содержащие ключевое слово в responsibilities или requirements
+                    matching_vacancies = []
+                    for vacancy in vacancies:
+                        description = (vacancy.responsibilities + " " + vacancy.requirements).lower()
+                        if keyword in description:
+                            matching_vacancies.append(vacancy)
+
+                    if matching_vacancies:
+                        print(f"\nНайдено вакансий с ключевым словом «{keyword}»: {len(matching_vacancies)}")
+                        for i, vacancy in enumerate(matching_vacancies, 1):
+                            # Отображаем профессиональную роль вместо названия
+                            professional_role = ", ".join(
+                                vacancy.professional_roles) if vacancy.professional_roles else "Не указано"
+                            salary_part = vacancy.salary_info
+                            city_part = vacancy.city if vacancy.city != "Не указан" else ""
+                            parts = [professional_role, salary_part, city_part]
+                            print(f"{i}. {' | '.join(filter(None, parts))}")
+                        print()
+                    else:
+                        print(f"\nВакансии с ключевым словом «{keyword}» не найдены.\n")
+
+                else:
+                    print("Некорректный ввод. Пожалуйста, выберите действие от 1 до 3.\n")
 
         elif action == "3":
             if os.path.exists(file_worker.filename):
@@ -105,7 +178,6 @@ def main():
 
         else:
             print("Некорректный ввод. Пожалуйста, выберите действие от 1 до 4.\n")
-
 
 
 if __name__ == "__main__":

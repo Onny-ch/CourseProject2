@@ -47,7 +47,7 @@ def test_vacancy_validate_salary():
     vacancy1 = Vacancy(data1)
     assert vacancy1.salary_from == Decimal("100000")
     assert vacancy1.salary_to == Decimal("150000")
-    
+
     data2 = {"name": "Test", "alternate_url": "", "salary": None}
     vacancy2 = Vacancy(data2)
     assert vacancy2.salary_from == Decimal("0")

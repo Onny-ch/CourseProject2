@@ -236,7 +236,7 @@ def test_json_clear_file_exception():
     """Проверка обработки исключения при очистке JSON файла."""
     worker = JSONFileWorker("data/test.json")
     worker.save_data([{"id": "1"}])
-    
+
     with patch("builtins.open", side_effect=Exception("Unexpected error")):
         worker.clear_file()
     # Файл должен остаться
@@ -248,7 +248,7 @@ def test_json_load_data_not_list():
     worker = JSONFileWorker("data/test_not_list.json")
     with open(worker.filename, "w", encoding="utf-8") as f:
         json.dump({"not": "a list"}, f, ensure_ascii=False)
-    
+
     data = worker.load_data()
     assert data == []
 
@@ -258,7 +258,7 @@ def test_json_save_data_corrupted_existing():
     worker = JSONFileWorker("data/test_corrupted.json")
     with open(worker.filename, "w", encoding="utf-8") as f:
         f.write("{invalid json}")
-    
+
     worker.save_data([{"id": "1", "title": "New"}])
     data = worker.load_data()
     assert len(data) == 1

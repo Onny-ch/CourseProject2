@@ -73,12 +73,14 @@ class JSONFileWorker(AbstractFileWorker):
         # Проверка: все элементы должны быть словарями
         for i, item in enumerate(data):
             if not isinstance(item, dict):
-                print(f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}")
+                print(
+                    f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}"
+                )
                 raise ValueError("Данные для сохранения должны быть словарями")
 
         try:
             if os.path.exists(self.__filename):
-                with open(self.__filename, 'r', encoding='utf-8') as f:
+                with open(self.__filename, "r", encoding="utf-8") as f:
                     try:
                         existing_data = json.load(f)
                     except json.JSONDecodeError:
@@ -86,12 +88,12 @@ class JSONFileWorker(AbstractFileWorker):
             else:
                 existing_data = []
 
-            existing_ids = {item.get('id') for item in existing_data if item.get('id')}
-            unique_new = [item for item in data if item.get('id') not in existing_ids]
+            existing_ids = {item.get("id") for item in existing_data if item.get("id")}
+            unique_new = [item for item in data if item.get("id") not in existing_ids]
 
             combined_data = existing_data + unique_new
 
-            with open(self.__filename, 'w', encoding='utf-8') as f:
+            with open(self.__filename, "w", encoding="utf-8") as f:
                 json.dump(combined_data, f, ensure_ascii=False, indent=4)
 
         except IOError as e:
@@ -151,15 +153,21 @@ class CSVFileWorker(AbstractFileWorker):
         # Проверка: все элементы должны быть словарями
         for i, item in enumerate(data):
             if not isinstance(item, dict):
-                print(f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}")
+                print(
+                    f"[ERROR] Запись №{i} не словарь: type={type(item)}, value={repr(item)}"
+                )
                 raise ValueError("Данные для сохранения должны быть словарями")
 
         try:
             # Загружаем существующие данные
             if os.path.exists(self.__filename):
                 existing_data = self.load_data()
-                existing_ids = {item.get('id') for item in existing_data if item.get('id')}
-                unique_new = [item for item in data if item.get('id') not in existing_ids]
+                existing_ids = {
+                    item.get("id") for item in existing_data if item.get("id")
+                }
+                unique_new = [
+                    item for item in data if item.get("id") not in existing_ids
+                ]
                 combined_data = existing_data + unique_new
             else:
                 combined_data = data

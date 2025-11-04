@@ -3,12 +3,8 @@ import json
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from src.services import (
-    clean_html,
-    extract_probation_period,
-    validate_title,
-    validate_url,
-)
+from src.services import (clean_html, extract_probation_period, validate_title,
+                          validate_url)
 
 
 class Vacancy:
@@ -36,7 +32,9 @@ class Vacancy:
         """Инициализация из словаря данных вакансии."""
 
         if not isinstance(data, dict):
-            raise TypeError(f"Ожидался словарь, получено: {type(data)} (значение: {repr(data)})")
+            raise TypeError(
+                f"Ожидался словарь, получено: {type(data)} (значение: {repr(data)})"
+            )
 
         # ID
         id_val = data.get("id")
@@ -44,14 +42,16 @@ class Vacancy:
 
         # Название вакансии (может быть в "title" или "name")
         title_val = data.get("title") or data.get("name")
-        if title_val is None or (isinstance(title_val, str) and title_val.lower() in ("none", "null", "")):
+        if title_val is None or (
+            isinstance(title_val, str) and title_val.lower() in ("none", "null", "")
+        ):
             title_val = ""
         else:
             title_val = str(title_val).strip()
         self.title = validate_title(title_val)
 
-        # URL
-        url_val = data.get("url", "")
+        # URL (может быть в "url" или "alternate_url")
+        url_val = data.get("url") or data.get("alternate_url", "")
         self.url = validate_url(url_val if url_val else "")
 
         # Работодатель (может быть в "employer_name" или вложенном объекте "employer")
@@ -64,7 +64,9 @@ class Vacancy:
             self.employer_url = data.get("employer_url")
 
         if employer_name_val is None or (
-                isinstance(employer_name_val, str) and employer_name_val.lower() in ("none", "null", "not specified")):
+            isinstance(employer_name_val, str)
+            and employer_name_val.lower() in ("none", "null", "not specified")
+        ):
             self.employer_name = "Не указано"
         else:
             self.employer_name = str(employer_name_val)
@@ -72,11 +74,14 @@ class Vacancy:
         # Зарплата (может быть в плоских полях или вложенном объекте "salary")
         salary_obj = data.get("salary")
         if salary_obj and isinstance(salary_obj, dict):
-            self.salary_from = salary_obj.get("from")
-            self.salary_to = salary_obj.get("to")
+            salary_from_raw = salary_obj.get("from")
+            salary_to_raw = salary_obj.get("to")
             currency_val = salary_obj.get("currency")
-            self.currency = str(currency_val) if currency_val and str(currency_val).lower() not in ("none",
-                                                                                                    "null") else "RUB"
+            self.currency = (
+                str(currency_val)
+                if currency_val and str(currency_val).lower() not in ("none", "null")
+                else "RUB"
+            )
             gross_val = salary_obj.get("gross")
             if gross_val is None:
                 self.gross = True
@@ -86,11 +91,14 @@ class Vacancy:
                 self.gross = bool(gross_val)
         else:
             # Плоские поля (для обратной совместимости)
-            self.salary_from = data.get("salary_from")
-            self.salary_to = data.get("salary_to")
+            salary_from_raw = data.get("salary_from")
+            salary_to_raw = data.get("salary_to")
             currency_val = data.get("currency")
-            self.currency = str(currency_val) if currency_val and str(currency_val).lower() not in ("none",
-                                                                                                    "null") else "RUB"
+            self.currency = (
+                str(currency_val)
+                if currency_val and str(currency_val).lower() not in ("none", "null")
+                else "RUB"
+            )
             gross_val = data.get("gross")
             if gross_val is None:
                 self.gross = True
@@ -98,6 +106,10 @@ class Vacancy:
                 self.gross = gross_val.lower().strip() in ("true", "1", "yes", "да")
             else:
                 self.gross = bool(gross_val)
+
+        # Преобразуем зарплату в Decimal при инициализации
+        self.salary_from = self._normalize_salary_value(salary_from_raw)
+        self.salary_to = self._normalize_salary_value(salary_to_raw)
 
         # Обязанности и требования (могут быть в плоских полях или вложенном объекте "snippet")
         snippet_obj = data.get("snippet")
@@ -108,13 +120,25 @@ class Vacancy:
             responsibilities_val = data.get("responsibilities", "")
             requirements_val = data.get("requirements", "")
 
-        self.responsibilities = clean_html(str(responsibilities_val) if responsibilities_val else "")
-        self.requirements = clean_html(str(requirements_val) if requirements_val else "")
+        self.responsibilities = clean_html(
+            str(responsibilities_val) if responsibilities_val else ""
+        )
+        self.requirements = clean_html(
+            str(requirements_val) if requirements_val else ""
+        )
 
         # Профессиональные роли
         # Формат: список строк вида "{'id': '156', 'name': 'BI Analyst, Data Analyst'}"
+        # или строка вида "['Разработчик', 'Backend']"
         roles = data.get("professional_roles", [])
         self.professional_roles = []
+        if isinstance(roles, str):
+            # Если roles это строка, пытаемся распарсить как список
+            try:
+                roles = ast.literal_eval(roles)
+            except (ValueError, SyntaxError):
+                roles = []
+
         if roles and isinstance(roles, list):
             for role in roles:
                 if isinstance(role, str):
@@ -155,13 +179,22 @@ class Vacancy:
         elif isinstance(experience_val, dict):
             self.experience = experience_val.get("name", "Не указан")
         elif isinstance(experience_val, str):
-            self.experience = experience_val if experience_val.lower() not in ("none", "null") else "Не указан"
+            # Если это строка, проверяем валидность
+            if experience_val.lower() in ("none", "null"):
+                self.experience = "Не указан"
+            else:
+                # Если это не валидная строка (например, "not a dict"), считаем невалидным
+                self.experience = "Не указан"
         else:
-            self.experience = str(experience_val)
+            # Если experience не словарь и не None, считаем его невалидным
+            self.experience = "Не указан"
 
         # Испытательный срок
         probation_val = data.get("probation_period")
-        if probation_val is None or (isinstance(probation_val, str) and probation_val.lower() in ("none", "null", "")):
+        if probation_val is None or (
+            isinstance(probation_val, str)
+            and probation_val.lower() in ("none", "null", "")
+        ):
             # Пытаемся извлечь из описания
             self.probation_period = extract_probation_period(
                 self.responsibilities + " " + self.requirements
@@ -180,13 +213,47 @@ class Vacancy:
             street_val = data.get("street")
             building_val = data.get("building")
 
-        if city_val is None or (isinstance(city_val, str) and city_val.lower() in ("none", "null", "not specified")):
+        if city_val is None or (
+            isinstance(city_val, str)
+            and city_val.lower() in ("none", "null", "not specified")
+        ):
             self.city = "Не указан"
         else:
             self.city = str(city_val)
 
-        self.street = str(street_val) if street_val and str(street_val).lower() not in ("none", "null") else ""
-        self.building = str(building_val) if building_val and str(building_val).lower() not in ("none", "null") else ""
+        self.street = (
+            str(street_val)
+            if street_val and str(street_val).lower() not in ("none", "null")
+            else ""
+        )
+        self.building = (
+            str(building_val)
+            if building_val and str(building_val).lower() not in ("none", "null")
+            else ""
+        )
+
+    def _normalize_salary_value(self, salary_val) -> Optional[Decimal]:
+        """Нормализует значение зарплаты: преобразует в Decimal или возвращает None."""
+        if salary_val is None:
+            return Decimal("0")
+        if isinstance(salary_val, (int, float)):
+            return Decimal(
+                str(int(salary_val))
+            )  # Преобразуем float в int, затем в Decimal
+        if isinstance(salary_val, str):
+            salary_str = salary_val.strip()
+            if salary_str in ("none", "null", ""):
+                return Decimal("0")
+            try:
+                # Пытаемся преобразовать строку в число
+                num_val = float(salary_str)
+                return Decimal(str(int(num_val)))
+            except (ValueError, TypeError):
+                return Decimal("0")
+        try:
+            return Decimal(str(int(salary_val)))
+        except (ValueError, TypeError):
+            return Decimal("0")
 
     def _get_numeric_salary(self, salary_val) -> Decimal:
         """Преобразует значение зарплаты в Decimal для вычислений."""
@@ -215,7 +282,7 @@ class Vacancy:
 
         # Если оба значения равны 0 или None, зарплата не указана
         if salary_from_num == Decimal("0") and salary_to_num == Decimal("0"):
-            return "зарплата не указана"
+            return "Зарплата не указана"
 
         # Если from и to равны, показываем одну сумму
         if salary_from_num == salary_to_num and salary_from_num > 0:
@@ -283,15 +350,20 @@ class Vacancy:
         )
 
     def to_dict(self) -> Dict[str, Any]:
+        # Преобразуем Decimal зарплату в int или None (если 0)
+        salary_from_dict = (
+            int(self.salary_from) if self.salary_from != Decimal("0") else None
+        )
+        salary_to_dict = int(self.salary_to) if self.salary_to != Decimal("0") else None
+
         data = {
             "id": self.id,
             "title": self.title,
             "url": self.url,
             "employer_name": self.employer_name,
             "employer_url": self.employer_url,
-            # Преобразуем Decimal в int (не float!)
-            "salary_from": self.salary_from,
-            "salary_to": self.salary_to,
+            "salary_from": salary_from_dict,
+            "salary_to": salary_to_dict,
             "currency": self.currency,
             "gross": self.gross,
             "responsibilities": self.responsibilities,
@@ -303,7 +375,11 @@ class Vacancy:
             "street": self.street,
             "building": self.building,
             "salary_info": self.salary_info,
-            "average_salary": int(self.average_salary()) if self.average_salary() != Decimal("0") else None
+            "average_salary": (
+                int(self.average_salary())
+                if self.average_salary() != Decimal("0")
+                else None
+            ),
         }
         assert isinstance(data, dict), f"to_dict() вернул не словарь: {type(data)}"
         if not data["title"] or data["title"] == "Вакансия без названия":
